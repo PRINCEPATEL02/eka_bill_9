@@ -1,0 +1,125 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+jobs:
+  security-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.1"
+          extensions: pdo, pdo_mysql, mysqli, curl, openssl
+
+      - name: Install Composer dependencies
+        run: composer install --no-progress --prefer-dist --optimize-autoloader
+
+      - name: Run Composer security audit
+        run: composer audit --no-interaction
+
+      - name: Run PHP Security Checker
+        uses: StephaneBour/actions-php-security-checker@v1
+        with:
+          composer-lock: ./composer.lock
+
+      - name: Run PHPStan static analysis
+        run: |
+          if command -v phpstan &> /dev/null; then
+            phpstan analyse --error-format=github
+          else
+            echo "PHPStan not installed, skipping static analysis"
+          fi
+
+      - name: Run PHPCS code style check
+        run: |
+          if command -v phpcs &> /dev/null; then
+            phpcs --standard=PSR12 --extensions=php --ignore=vendor/ . || true
+          else
+            echo "PHPCS not installed, skipping code style check"
+          fi
+
+  test:
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: rootpassword
+          MYSQL_DATABASE: test_db
+        ports:
+          - 3306:3306
+        options: --health-cmd="mysqladmin ping" --health-interval=10s --health-timeout=5s --health-retries=3
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.1"
+          extensions: pdo, pdo_mysql, mysqli, curl, openssl
+
+      - name: Install Composer dependencies
+        run: composer install --no-progress --prefer-dist --optimize-autoloader
+
+      - name: Create test database
+        run: |
+          mysql --host=127.0.0.1 --port=3306 --user=root --password=rootpassword -e "
+          CREATE DATABASE IF NOT EXISTS test_company_db;
+          CREATE USER IF NOT EXISTS 'testuser'@'%' IDENTIFIED BY 'testpass';
+          GRANT ALL PRIVILEGES ON test_company_db.* TO 'testuser'@'%';
+          FLUSH PRIVILEGES;"
+
+      - name: Run database migrations (if any)
+        run: |
+          if [ -f "check_tables.php" ]; then
+            php check_tables.php || true
+          fi
+
+      - name: Run PHPUnit tests
+        run: |
+          if [ -f "phpunit.xml" ] || [ -f "phpunit.xml.dist" ]; then
+            ./vendor/bin/phpunit --configuration phpunit.xml.dist || ./vendor/bin/phpunit
+          else
+            echo "No PHPUnit configuration found, skipping unit tests"
+          fi
+
+  deploy:
+    needs: [security-scan, test]
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy to production
+        run: |
+          echo "Deployment steps would go here"
+          echo "Example: rsync to production server, Docker build/push, etc."
+          # Add your deployment commands here
+
+  dependency-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: "fs"
+          scan-ref: "."
+          format: "sarif"
+          output: "trivy-results.sarif"
+
+      - name: Upload Trivy scan results to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v2
+        if: always()
+        with:
+          sarif_file: "trivy-results.sarif"

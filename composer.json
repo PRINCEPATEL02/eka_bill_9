@@ -1,0 +1,7 @@
+{
+  "name": "bill-management/bill-management-system",
+  "description": "A simple bill management system",
+  "require": {
+    "smalot/pdfparser": "^2.0"
+  }
+}

@@ -1,0 +1,65 @@
+version: '3.8'
+
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8080:80"
+    environment:
+      - APACHE_DOCUMENT_ROOT=/var/www/html
+    volumes:
+      - ./:/var/www/html
+      - ./logs/apache2:/var/log/apache2
+    depends_on:
+      - db
+    networks:
+      - bill-network
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /var/tmp
+    restart: unless-stopped
+
+  db:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-changeme123}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-company_db}
+      MYSQL_USER: ${MYSQL_USER:-billuser}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-billpass}
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./docker/mysql/init:/docker-entrypoint-initdb.d
+      - ./logs/mysql:/var/log/mysql
+    networks:
+      - bill-network
+    command: --default-authentication-plugin=mysql_native_password
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --requirepass ${REDIS_PASSWORD:-changeme456}
+    volumes:
+      - redis_data:/data
+      - ./logs/redis:/var/log/redis
+    networks:
+      - bill-network
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
+volumes:
+  mysql_data:
+    driver: local
+  redis_data:
+    driver: local
+
+networks:
+  bill-network:
+    driver: bridge
